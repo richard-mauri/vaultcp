@@ -20,12 +20,15 @@ func list(client *api.Client, path string) (keys []string, err error) {
 
 	ikeys := s.Data["keys"].([]interface{})
 
-	keys = make([]string, len(ikeys))
-	for i, v := range ikeys {
-		keys[i] = fmt.Sprint(v)
-	}
-	// TODO combin e without forming new array
-	for _, k := range keys {
+	/*
+		keys = make([]string, len(ikeys))
+		for i, v := range ikeys {
+			keys[i] = fmt.Sprint(v)
+		}
+	*/
+	for _, ik := range ikeys {
+		k := fmt.Sprint(ik)
+		// for _, k := range keys {
 		if strings.HasSuffix(k, "/") {
 			k2 := strings.TrimSuffix(k, "/")
 			p2 := fmt.Sprintf("%s/%s", path, k2)
@@ -34,8 +37,13 @@ func list(client *api.Client, path string) (keys []string, err error) {
 				return keys, err
 			}
 		} else {
-			p2 := fmt.Sprintf("%s/%s", path, k)
-			log.Printf("%s\n", p2)
+			path2 := strings.Replace(path, "metadata", "data", 1)
+			p2 := fmt.Sprintf("%s/%s", path2, k)
+			output, err := read(client, p2)
+			if err != nil {
+				return keys, err
+			}
+			log.Printf("%s %s\n", p2, output)
 		}
 	}
 	return keys, err
@@ -64,11 +72,4 @@ func main() {
 		log.Printf("Error listing secret: %s", err)
 		os.Exit(1)
 	}
-
-	output, err := read(client, "secret/data/s1")
-	if err != nil {
-		log.Printf("Error reading secret: %s", err)
-		os.Exit(1)
-	}
-	log.Printf("read output = %s\n", output)
 }
