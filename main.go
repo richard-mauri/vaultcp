@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/hashicorp/vault/api"
 )
@@ -22,6 +23,20 @@ func list(client *api.Client, path string) (keys []string, err error) {
 	keys = make([]string, len(ikeys))
 	for i, v := range ikeys {
 		keys[i] = fmt.Sprint(v)
+	}
+	// TODO combin e without forming new array
+	for _, k := range keys {
+		if strings.HasSuffix(k, "/") {
+			k2 := strings.TrimSuffix(k, "/")
+			p2 := fmt.Sprintf("%s/%s", path, k2)
+			_, err = list(client, p2)
+			if err != nil {
+				return keys, err
+			}
+		} else {
+			p2 := fmt.Sprintf("%s/%s", path, k)
+			log.Printf("%s\n", p2)
+		}
 	}
 	return keys, err
 }
@@ -44,13 +59,10 @@ func main() {
 	client, err := api.NewClient(&api.Config{
 		Address: addr,
 	})
-	keys, err := list(client, "secret/metadata")
+	_, err = list(client, "secret/metadata")
 	if err != nil {
 		log.Printf("Error listing secret: %s", err)
 		os.Exit(1)
-	}
-	for i, k := range keys {
-		log.Printf("key %d = %s\n", i, k)
 	}
 
 	output, err := read(client, "secret/data/s1")
