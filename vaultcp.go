@@ -22,6 +22,7 @@ var (
 	kvApi      bool   = false
 	srcClients []*api.Client
 	dstClients []*api.Client
+	listFile   *os.File
 
 	// flags below
 	numWorkers    *int
@@ -132,14 +133,22 @@ func listWorker(id int, job map[string]interface{}, wg *sync.WaitGroup) {
 		var err error
 		v, err = readRaw(srcClients[id], k)
 		if err != nil {
-			log.Printf("Error: %s\n", err)
+			log.Printf("Error from readRaw: %s\n", err)
 		}
 
-		v2, err := marshalData(v.(map[string]interface{}))
+		// print just the data element as we expect the metadata to be different, which would make determining diffs hard
+		vComplete := v.(map[string]interface{})
+		vData := vComplete["data"]
+		v2, err := marshalData(vData.(map[string]interface{}))
 		if err != nil {
-			log.Printf("Error: %s\n", err)
+			log.Printf("Error from marshalData: %s\n", err)
 		}
-		fmt.Printf("%s %v\n", k, v2)
+		line := fmt.Sprintf("%s %s\n", k, v2)
+		_, err = listFile.WriteString(line)
+		if err != nil {
+			log.Printf("Error from listFile.WriteString(%s): %s\n", line, err)
+		}
+		// fmt.Printf("%s %v\n", k, v2)
 	}
 	log.Println("list worker", id, "finished read job of", len(job), " keys")
 	wg.Done()
@@ -153,13 +162,13 @@ func writeWorker(id int, job map[string]interface{}, wg *sync.WaitGroup) {
 		var err error
 		v, err = readRaw(srcClients[id], k)
 		if err != nil {
-			log.Printf("Error: %s\n", err)
+			log.Printf("Error from readRaw: %s\n", err)
 		}
 
 		log.Printf("write worker %d writing %s => %v\n", id, k, v)
 		_, err = dstClients[id].Logical().Write(k, v.(map[string]interface{}))
 		if err != nil {
-			log.Printf("Error: %s\n", err)
+			log.Printf("Error from Vault write: %s\n", err)
 		}
 	}
 	fmt.Println("write worker", id, "finished write job of", len(job), " keys")
@@ -172,6 +181,10 @@ func list(client *api.Client, path string, outputAndRead bool, kv map[string]int
 	s, err := client.Logical().List(path)
 	if err != nil {
 		return err
+	}
+
+	if s == nil {
+		return // no entries
 	}
 
 	ikeys := s.Data["keys"].([]interface{})
@@ -294,7 +307,7 @@ func prep() {
 			Address: *srcVaultAddr,
 		})
 		if err != nil {
-			log.Printf("Error: %s\n", err)
+			log.Printf("Error from vault NewClient : %s\n", err)
 			os.Exit(1)
 		}
 		srcClient.SetToken(*srcVaultToken)
@@ -305,7 +318,7 @@ func prep() {
 				Address: *dstVaultAddr,
 			})
 			if err != nil {
-				log.Printf("Error: %s\n", err)
+				log.Printf("Error from vault NewClient : %s\n", err)
 				os.Exit(1)
 			}
 			dstClient.SetToken(*dstVaultToken)
@@ -370,7 +383,15 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		err := list2(path)
+		var err error
+		listFile, err = os.Create("/tmp/vaultcp.out")
+		if err != nil {
+			log.Printf("Error creating list output file: %s", err)
+			os.Exit(1)
+		}
+		defer listFile.Close()
+
+		err = list2(path)
 		if err != nil {
 			log.Printf("Error listing secrets: %s", err)
 			os.Exit(1)
