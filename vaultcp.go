@@ -126,7 +126,7 @@ func copy(path string) (err error) {
 }
 
 func listWorker(id int, job map[string]interface{}, wg *sync.WaitGroup) {
-	log.Println("list worker", id, "starting write job of ", len(job), " keys")
+	log.Println("list worker", id, "starting job of ", len(job), " keys")
 	for k, v := range job {
 		// Assert v == nil; lazy read to help parallelization
 		log.Printf("list worker %d reading %s\n", id, k)
@@ -138,19 +138,30 @@ func listWorker(id int, job map[string]interface{}, wg *sync.WaitGroup) {
 
 		// print just the data element as we expect the metadata to be different, which would make determining diffs hard
 		vComplete := v.(map[string]interface{})
-		vData := vComplete["data"]
-		v2, err := marshalData(vData.(map[string]interface{}))
-		if err != nil {
-			log.Printf("Error from marshalData: %s\n", err)
+		if kvApi {
+			vData := vComplete["data"]
+			v2, err := marshalData(vData.(map[string]interface{}))
+			if err != nil {
+				log.Printf("Error from marshalData: %s\n", err)
+			}
+			line := fmt.Sprintf("%s %s\n", k, v2)
+			_, err = listFile.WriteString(line)
+			if err != nil {
+				log.Printf("Error from listFile.WriteString(%s): %s\n", line, err)
+			}
+		} else {
+			v2, err := marshalData(vComplete)
+			if err != nil {
+				log.Printf("Error from marshalData: %s\n", err)
+			}
+			line := fmt.Sprintf("%s %s\n", k, v2)
+			_, err = listFile.WriteString(line)
+			if err != nil {
+				log.Printf("Error from listFile.WriteString(%s): %s\n", line, err)
+			}
 		}
-		line := fmt.Sprintf("%s %s\n", k, v2)
-		_, err = listFile.WriteString(line)
-		if err != nil {
-			log.Printf("Error from listFile.WriteString(%s): %s\n", line, err)
-		}
-		// fmt.Printf("%s %v\n", k, v2)
 	}
-	log.Println("list worker", id, "finished read job of", len(job), " keys")
+	log.Println("list worker", id, "finished job of", len(job), " keys")
 	wg.Done()
 }
 
@@ -255,11 +266,11 @@ func readRaw(client *api.Client, path string) (value map[string]interface{}, err
 	return value, err
 }
 
-func fetchVersionInfo(client *api.Client) (kvApi bool, kvRoot string, err error) {
+func fetchVersionInfo(client *api.Client) (kvApiLocal bool, kvRoot string, err error) {
 	sys := client.Sys()
 	mounts, err := sys.ListMounts()
 	if err != nil {
-		return kvApi, kvRoot, err
+		return kvApiLocal, kvRoot, err
 	}
 
 	for k, v := range mounts {
@@ -271,15 +282,15 @@ func fetchVersionInfo(client *api.Client) (kvApi bool, kvRoot string, err error)
 
 	healthResponse, err := sys.Health()
 	if err != nil {
-		return kvApi, kvRoot, err
+		return kvApiLocal, kvRoot, err
 	}
 	parts := strings.Split(healthResponse.Version, " ") // example: 0.9.5
 	parts = strings.Split(parts[0], ".")
 	majorVer, err := strconv.Atoi(parts[0])
 	minorVer, err := strconv.Atoi(parts[1])
-	kvApi = majorVer > 0 || minorVer >= 10
+	kvApiLocal = majorVer > 0 || minorVer >= 10
 
-	return kvApi, kvRoot, err
+	return kvApiLocal, kvRoot, err
 }
 
 func prep() {
